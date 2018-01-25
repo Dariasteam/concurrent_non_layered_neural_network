@@ -1,7 +1,141 @@
 #include <iostream>
-
 #include <vector>
+#include <functional>
+#include <future>
+
 #include <time.h>
+
+class axon {
+private:
+  double value;
+public:
+  void set_value (double v) { value = v; }
+  double get_value () const { return value; }
+};
+
+class neuron {
+private:
+  double value;
+  std::vector<axon*> inputs;
+  std::vector<axon*> outputs;
+public:
+  void add_input (axon* input) {
+    inputs.push_back(input);
+  }
+
+  void add_output (axon* output) {
+    outputs.push_back(output);
+  }
+
+  void calculate_value () {
+    for (axon* aux : inputs)
+      value += aux->get_value();
+  }
+
+  void propaget_value () {
+    for (axon* aux : outputs)
+      aux->set_value(value);
+  }
+
+  double get_value () const { return value; }
+};
+
+class concurrent_neural_netowrk {
+private:
+  unsigned inputs;
+  unsigned outputs;
+
+  std::vector<axon*> input_axons;
+  std::vector<axon*> output_axons;
+
+  std::vector<neuron*> neurons;
+  std::vector<unsigned> concurrent_steps;
+
+public:
+
+  concurrent_neural_netowrk (const std::vector<std::vector<bool>>& net,
+                             const std::vector<unsigned> concurrent_s,
+                             unsigned inps, unsigned outs) :
+      inputs(inps),
+      outputs(outs),
+      concurrent_steps (concurrent_s)
+    {
+
+    unsigned size = net.size();
+
+    neurons.resize(size);
+    for (unsigned i = 0; i < size; i++)
+      neurons[i] = new neuron();
+
+    // Generate the net
+    for (unsigned i = 0; i < size; i++) {
+      for (unsigned j = 0; j < size; j++) {
+        if (net[i][j]) {
+          axon* aux = new axon();
+          neurons[i]->add_output(aux);
+          neurons[j]->add_input(aux);
+        }
+      }
+    }
+
+    // Generate the inputs axons
+    input_axons.resize(inputs);
+    for (unsigned i = 0; i < inputs; i++) {
+      axon* aux = new axon();
+      neurons[i]->add_input(aux);
+      input_axons[i] = aux;
+    }
+
+    // Generate the outputs axons
+    output_axons.resize(outputs);
+    for (unsigned i = 0; i < outputs; i++) {
+      axon* aux = new axon();
+      neurons[size - outputs + i]->add_output(aux);
+      output_axons[i] = aux;
+    }
+  }
+
+  bool operator () (const std::vector<double>& inputs_values,
+                          std::vector<double>& outputs_values) {
+
+    // Comprobar compatibilidad de los vectores
+    unsigned i_size = inputs_values.size();
+    unsigned o_size = outputs;
+    if (i_size != input_axons.size())
+      return false;
+
+    // Establecer los inputs
+    for (unsigned i = 0; i < i_size; i++)
+      input_axons[i]->set_value(inputs_values[i]);
+
+
+    std::vector<std::future<void>> promises (neurons.size());
+    auto calculate_neuron = [&](unsigned i ) {
+      neurons[i]->calculate_value();
+      neurons[i]->propaget_value();
+    };
+
+    // Realizar el cálculo concurrente
+    unsigned last_neuron = 0;
+    for (unsigned concurrent_group : concurrent_steps) {
+      for (unsigned i = last_neuron; i <= concurrent_group; i++)
+        promises[i] = std::async(calculate_neuron, i);
+
+      for (unsigned i = last_neuron; i < concurrent_group; i++)
+        promises[i].get();
+
+      last_neuron = concurrent_group + 1;
+    }
+
+    // Recoger los outputs
+    outputs_values.resize(o_size);
+    for (unsigned i = 0; i < o_size; i++)
+      outputs_values[i] = output_axons[i]->get_value();
+
+    return true;
+  }
+};
+
 
 std::vector<std::vector<bool>> random_graph_generator() {
   std::vector<std::vector<bool>> vec;
@@ -30,40 +164,30 @@ std::vector<unsigned> generate_visited_nodes (const std::vector<std::vector<bool
     }
   }
 
-  for (auto& element : visited_nodes)
-    std::cout << element << " ";
-
-  std::cout << "\n\n";
-
   return visited_nodes;
 }
 
-std::vector<std::vector<unsigned>> algorithm (const std::vector<std::vector<bool>>& vec) {
+std::vector<unsigned> algorithm (const std::vector<std::vector<bool>>& vec) {
   unsigned size = vec.size();
   std::vector<unsigned> visited_nodes = generate_visited_nodes(vec);
 
-  std::vector<std::vector<unsigned>> solve (size);
+  std::vector<unsigned> solve;
 
   auto aux_visited = visited_nodes;
 
-  for (auto& row : solve)
-    row.resize(size);
-
-  unsigned iteration = 1;
+  unsigned last_node = 0;
 
   for (unsigned i = 0; i < size; i++) {
     for (unsigned j = 0; j < size; j++) {
       if (vec[i][j]) {
         if (visited_nodes[i] > 0) {
-          iteration++;
           visited_nodes = aux_visited;
-          std::cout << "Cambio en el índice " << i << " " << j << std::endl;
+          solve.push_back(last_node);
         }
-        solve[i][j] = iteration;
-        std::cout << "Le resto a " << j << " que vale " << visited_nodes[j] << std::endl;
         aux_visited[j]--;
       }
     }
+    last_node++;
   }
   return solve;
 }
@@ -74,17 +198,16 @@ int main(int argc, char **argv) {
 
 
   vec_graph = {
-                {0, 0, 0, 1, 0, 0, 0, 0, 0},
-                {0, 0, 0, 1, 1, 0, 0, 0, 0},
-                {0, 0, 0, 0, 0, 1, 0, 0, 1},
-                {0, 0, 0, 0, 1, 0, 1, 0, 0},
-                {0, 0, 0, 0, 0, 0, 1, 0, 0},
-                {0, 0, 0, 0, 0, 0, 1, 1, 1},
-                {0, 0, 0, 0, 0, 0, 0, 1, 1},
-                {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                {0, 0, 0, 0, 0, 0, 0, 0, 0},
-              };
-
+    {0, 0, 0, 1, 0, 0, 0, 0, 0},
+    {0, 0, 0, 1, 1, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 1, 0, 0, 1},
+    {0, 0, 0, 0, 1, 0, 1, 0, 0},
+    {0, 0, 0, 0, 0, 0, 1, 0, 0},
+    {0, 0, 0, 0, 0, 0, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  };
 
   auto vec_solve = algorithm(vec_graph);
 
@@ -99,13 +222,21 @@ int main(int argc, char **argv) {
 
   std::cout << "\n\n";
 
-  for (unsigned i = 0; i < size; i++) {
-    for (unsigned j = 0; j < size; j++) {
-      std::cout << vec_solve[i][j] << " ";
-    }
-    std::cout << "\n";
-  }
+  size = vec_solve.size();
+  for (unsigned i = 0; i < size; i++)
+    std::cout << vec_solve[i] << " ";
 
+  concurrent_neural_netowrk nn (vec_graph, vec_solve, 3, 2);
+
+  std::vector<double> outputs;
+  std::vector<double> inputs{1, 1, 1};
+  if (nn (inputs, outputs)) {
+    std::cout << "\nSuccess\n";
+    for (auto& value : outputs)
+      std::cout << value << " ";
+  } else {
+    std::cout << "\nError\n";
+  }
 
   return 0;
 }

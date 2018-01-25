@@ -1,2 +1,2 @@
 default:
-	g++ -o concurrent_graph main.cpp
+	g++ -fPIC -pthread -g -o concurrent_graph main.cpp
