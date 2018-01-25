@@ -32,7 +32,7 @@ public:
       value += aux->get_value();
   }
 
-  void propaget_value () {
+  void propagatt_value () {
     for (axon* aux : outputs)
       aux->set_value(value);
   }
@@ -101,7 +101,7 @@ public:
     // Comprobar compatibilidad de los vectores
     unsigned i_size = inputs_values.size();
     unsigned o_size = outputs;
-    if (i_size != input_axons.size())
+    if (i_size != inputs)
       return false;
 
     // Establecer los inputs
@@ -112,7 +112,7 @@ public:
     std::vector<std::future<void>> promises (neurons.size());
     auto calculate_neuron = [&](unsigned i ) {
       neurons[i]->calculate_value();
-      neurons[i]->propaget_value();
+      neurons[i]->propagatt_value();
     };
 
     // Realizar el cálculo concurrente
@@ -139,11 +139,11 @@ public:
 
 std::vector<std::vector<bool>> random_graph_generator() {
   std::vector<std::vector<bool>> vec;
-  unsigned size = rand() % 10 + 1;
+  unsigned size = rand() % 10000 + 1;
   vec.resize(size);
   for (unsigned i = 0; i < size; i++) {
     vec[i].resize(size);
-    for (unsigned j = 0; j < size; j++) {
+    for (unsigned j = i; j < size; j++) {
       if (rand() % 5 < 1)
         vec[i][j] = true;
       else
@@ -158,16 +158,16 @@ std::vector<unsigned> generate_visited_nodes (const std::vector<std::vector<bool
   std::vector<unsigned> visited_nodes (size);
 
   for (unsigned i = 0; i < size; i++) {
-    for (unsigned j = 0; j < size; j++) {
-      if (vec[j][i])
-        visited_nodes[i]++;
+    for (unsigned j = i + 1; j < size; j++) {
+      if (vec[i][j])
+        visited_nodes[j]++;
     }
   }
 
   return visited_nodes;
 }
 
-std::vector<unsigned> algorithm (const std::vector<std::vector<bool>>& vec) {
+std::vector<unsigned> generate_concurrent_steps (const std::vector<std::vector<bool>>& vec) {
   unsigned size = vec.size();
   std::vector<unsigned> visited_nodes = generate_visited_nodes(vec);
 
@@ -178,17 +178,19 @@ std::vector<unsigned> algorithm (const std::vector<std::vector<bool>>& vec) {
   unsigned last_node = 0;
 
   for (unsigned i = 0; i < size; i++) {
-    for (unsigned j = 0; j < size; j++) {
+    for (unsigned j = i + 1; j < size; j++) {
       if (vec[i][j]) {
-        if (visited_nodes[i] > 0) {
+        if (visited_nodes[i] != 0) {
           visited_nodes = aux_visited;
           solve.push_back(last_node);
         }
         aux_visited[j]--;
+        last_node = i;
       }
     }
-    last_node++;
   }
+  solve.push_back(last_node);
+  solve.push_back(size - 1);
   return solve;
 }
 
@@ -196,7 +198,7 @@ int main(int argc, char **argv) {
   srand(time(nullptr));
   auto vec_graph = random_graph_generator();
 
-
+  /*
   vec_graph = {
     {0, 0, 0, 1, 0, 0, 0, 0, 0},
     {0, 0, 0, 1, 1, 0, 0, 0, 0},
@@ -208,17 +210,20 @@ int main(int argc, char **argv) {
     {0, 0, 0, 0, 0, 0, 0, 0, 0},
     {0, 0, 0, 0, 0, 0, 0, 0, 0},
   };
+  */
 
-  auto vec_solve = algorithm(vec_graph);
+  auto vec_solve = generate_concurrent_steps(vec_graph);
 
   unsigned size = vec_graph.size();
 
+  /*
   for (unsigned i = 0; i < size; i++) {
     for (unsigned j = 0; j < size; j++) {
       std::cout << vec_graph[i][j] << " ";
     }
     std::cout << "\n";
   }
+  */
 
   std::cout << "\n\n";
 
@@ -230,6 +235,12 @@ int main(int argc, char **argv) {
 
   std::vector<double> outputs;
   std::vector<double> inputs{1, 1, 1};
+
+  std::cout << "\n\n" << vec_graph.size() << std::endl;
+
+  while (1)
+    nn (inputs, outputs);
+
   if (nn (inputs, outputs)) {
     std::cout << "\nSuccess\n";
     for (auto& value : outputs)
