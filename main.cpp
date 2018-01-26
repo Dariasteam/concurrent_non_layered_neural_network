@@ -3,13 +3,17 @@
 #include <functional>
 #include <future>
 #include <stack>
+#include <map>
+#include <cmath>
 
 #include <time.h>
 
 class axon {
 private:
   double value;
+  double weight;
 public:
+  axon (double w) : weight (w) {}
   void set_value (double v) { value = v; }
   double get_value () const { return value; }
 };
@@ -17,11 +21,19 @@ public:
 class neuron {
 private:
   double value;
+  double threshold;
+
+  unsigned n_inputs;
+
   std::vector<axon*> inputs;
   std::vector<axon*> outputs;
 public:
+
+  void set_threshold (double t) { threshold = t; }
+
   void add_input (axon* input) {
     inputs.push_back(input);
+    n_inputs++;
   }
 
   void add_output (axon* output) {
@@ -33,13 +45,45 @@ public:
       value += aux->get_value();
   }
 
-  void propagatt_value () {
+  void propagate_value () {
+    value = std::tanh(value + threshold / n_inputs);
     for (axon* aux : outputs)
       aux->set_value(value);
+    value = 0;
   }
 
   double get_value () const { return value; }
 };
+
+class feedback_bus {
+private:
+  unsigned size;
+  std::vector<axon*> inputs;
+  std::vector<axon*> outputs;
+  neuron* destiny;
+public:
+
+  feedback_bus (neuron* des) : destiny (des) {}
+
+  void add_connection (neuron* origin, double weight) {
+    size++;
+
+    axon* aux1 = new axon(weight);
+    axon* aux2 = new axon(1);
+
+    inputs.push_back(aux1);
+    origin->add_output(aux1);
+
+    outputs.push_back(aux2);
+    destiny->add_input(aux2);
+  }
+
+  void propagate_value () {
+    for (unsigned i = 0; i < size; i++)
+      outputs[i]->set_value (inputs[i]->get_value());
+  }
+};
+
 
 class concurrent_neural_network {
 private:
@@ -52,9 +96,23 @@ private:
   std::vector<neuron*> neurons;
   std::vector<unsigned> concurrent_steps;
 
+  std::map<unsigned, feedback_bus*> feedbackers;
+
+  void add_feedbacker (unsigned origin_neuron, unsigned destiny_neuron, double w) {
+    if (feedbackers.find(origin_neuron) == feedbackers.end())
+      feedbackers[destiny_neuron] = new feedback_bus(neurons[destiny_neuron]);
+    feedbackers[destiny_neuron]->add_connection(neurons[origin_neuron], w);
+  }
+
+  void propagate_feedback () {
+    for (auto& feedbacker : feedbackers)
+      feedbacker.second->propagate_value();
+  }
+
 public:
 
-  concurrent_neural_network (const std::vector<std::vector<bool>>& net,
+  concurrent_neural_network (const std::vector<std::vector<bool>>& net_graph,
+                             const std::vector<std::vector<double>>& net_costs,
                              const std::vector<unsigned> concurrent_s,
                              unsigned inps, unsigned outs) :
       inputs(inps),
@@ -62,7 +120,7 @@ public:
       concurrent_steps (concurrent_s)
     {
 
-    unsigned size = net.size();
+    unsigned size = net_graph.size();
 
     neurons.resize(size);
     for (unsigned i = 0; i < size; i++)
@@ -70,11 +128,21 @@ public:
 
     // Generate the net
     for (unsigned i = 0; i < size; i++) {
-      for (unsigned j = 0; j < size; j++) {
-        if (net[i][j]) {
-          axon* aux = new axon();
+      // diagonal (threshold)
+      neurons[i]->set_threshold(net_costs[i][i]);
+
+      // upper triangle (propagative)
+      for (unsigned j = i + 1; j < size; j++) {
+        if (net_graph[i][j]) {
+          axon* aux = new axon(net_costs[i][j]);
           neurons[i]->add_output(aux);
           neurons[j]->add_input(aux);
+        }
+      }
+      // lower triangle (feedbacker)
+      for (unsigned j = 0; j < i; j++) {
+        if (net_graph[i][j]) {
+          add_feedbacker(i, j, net_costs[i][j]);
         }
       }
     }
@@ -82,7 +150,7 @@ public:
     // Generate the inputs axons
     input_axons.resize(inputs);
     for (unsigned i = 0; i < inputs; i++) {
-      axon* aux = new axon();
+      axon* aux = new axon(1);
       neurons[i]->add_input(aux);
       input_axons[i] = aux;
     }
@@ -90,7 +158,7 @@ public:
     // Generate the outputs axons
     output_axons.resize(outputs);
     for (unsigned i = 0; i < outputs; i++) {
-      axon* aux = new axon();
+      axon* aux = new axon(1);
       neurons[size - outputs + i]->add_output(aux);
       output_axons[i] = aux;
     }
@@ -98,6 +166,8 @@ public:
 
   bool operator () (const std::vector<double>& inputs_values,
                           std::vector<double>& outputs_values) {
+
+    propagate_feedback();
 
     // Comprobar compatibilidad de los vectores
     unsigned i_size = inputs_values.size();
@@ -113,7 +183,7 @@ public:
     std::vector<std::future<void>> promises (neurons.size());
     auto calculate_neuron = [&](unsigned i ) {
       neurons[i]->calculate_value();
-      neurons[i]->propagatt_value();
+      neurons[i]->propagate_value();
     };
 
     // Realizar el cálculo concurrente
@@ -140,12 +210,12 @@ public:
 
 std::vector<std::vector<bool>> random_graph_generator() {
   std::vector<std::vector<bool>> vec;
-  unsigned size = 10 + 1;
+  unsigned size = 50 + 1;
   vec.resize(size);
   for (unsigned i = 0; i < size; i++) {
     vec[i].resize(size);
     for (unsigned j = i; j < size; j++) {
-      if (rand() % 5 < 1)
+      if (rand() % 50 < 1)
         vec[i][j] = true;
       else
         vec[i][j] = false;
@@ -214,15 +284,6 @@ void delete_row_col (std::vector<std::vector<bool>>& original, unsigned node) {
   }
 
   original = aux;
-  /*
-  for (auto& row : original)
-    row.clear();
-  original.clear();
-  original.resize (size - 1);
-
-  for (unsigned i = 0; i < size - 1; i++)
-    original[i] = aux[i];
-  */
 }
 
 
@@ -274,6 +335,13 @@ void delete_deathend_nodes (std::vector<std::vector<bool>>& vec,
   }
 }
 
+/**
+* @brief Extracts the hidden layers of the net and creates a vector of groups
+* of neurons that can be safely calculated concurrently.
+*
+* @param vec p_vec: Cost matriz of the net
+* @return std::vector< unsigned int > groups of neurons conccurent-safe
+*/
 std::vector<unsigned> generate_concurrent_steps (const std::vector<std::vector<bool>>& vec) {
   unsigned size = vec.size();
   std::vector<unsigned> visited_nodes = generate_visited_nodes(vec);
@@ -334,7 +402,6 @@ int main(int argc, char **argv) {
   };
   */
 
-/*
   vec_graph = {
     {0, 0, 0, 1, 0, 0, 0, 0, 0},
     {0, 0, 0, 1, 1, 0, 0, 0, 0},
@@ -343,16 +410,31 @@ int main(int argc, char **argv) {
     {0, 0, 0, 0, 0, 0, 0, 1, 0},
     {0, 0, 0, 0, 0, 0, 1, 1, 1},
     {0, 0, 0, 0, 0, 0, 0, 1, 1},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 1, 0, 0, 0, 0},
     {0, 0, 0, 0, 0, 0, 0, 0, 0},
   };
-*/
-  print_graph_matrix(vec_graph);
 
+  std::vector<std::vector<double>> vec_cost = {
+    {0, 0, 0, 1, 0, 0, 0, 0, 0},
+    {0, 0, 0, 1, 1, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 1, 0, 0, 1},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 1, 0},
+    {0, 0, 0, 0, 0, 0, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 1, 1},
+    {0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  };
+
+
+//  print_graph_matrix(vec_graph);
+  unsigned old_size = vec_graph.size();
 
   delete_deathend_nodes(vec_graph, 3, 2);
 
-  print_graph_matrix(vec_graph);
+  std::cout << "Improved from " << old_size << " neurons to " << vec_graph.size() << "\n";
+
+//  print_graph_matrix(vec_graph);
 
   auto vec_solve = generate_concurrent_steps(vec_graph);
 
@@ -366,17 +448,17 @@ int main(int argc, char **argv) {
   //concurrent_neural_netowrk nn (vec_graph, vec_solve, 3, 2);
 
   //std::vector<double> outputs;
-  std::vector<double> inputs{1, 1, 1};
+  std::vector<double> inputs{-1,-1,-1};
 
   std::cout << "\n\n" << vec_graph.size() << std::endl;
 
-  unsigned n_networks = 100;
+  unsigned n_networks = 1000;
 
   std::vector<concurrent_neural_network*> c_nns (n_networks);
   std::vector<std::future<void>> promises (n_networks);
 
   auto op_generate = [&](unsigned i) {
-    c_nns[i] = new concurrent_neural_network (vec_graph, vec_solve, 3, 2);
+    c_nns[i] = new concurrent_neural_network (vec_graph, vec_cost, vec_solve, 3, 2);
   };
 
   for (unsigned i = 0; i < n_networks; i++)
@@ -390,10 +472,10 @@ int main(int argc, char **argv) {
   auto op_evaluate = [&](unsigned i) {
     std::vector<double> outputs;
     c_nns[i]->operator() (inputs, outputs);
+    std::cout << "Fin " << i << " " << outputs[0] << " " << outputs[1] << std::endl;
   };
 
-  /*
-  while (1) {
+  while (true) {
     for (unsigned i = 0; i < n_networks; i++)
       promises[i] = std::async(op_evaluate, i);
 
@@ -402,6 +484,6 @@ int main(int argc, char **argv) {
 
     std::cout << "Fin evaluación" << std::endl;
   }
-  */
+
   return 0;
 }
