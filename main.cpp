@@ -2,6 +2,7 @@
 #include <vector>
 #include <functional>
 #include <future>
+#include <stack>
 
 #include <time.h>
 
@@ -40,7 +41,7 @@ public:
   double get_value () const { return value; }
 };
 
-class concurrent_neural_netowrk {
+class concurrent_neural_network {
 private:
   unsigned inputs;
   unsigned outputs;
@@ -53,7 +54,7 @@ private:
 
 public:
 
-  concurrent_neural_netowrk (const std::vector<std::vector<bool>>& net,
+  concurrent_neural_network (const std::vector<std::vector<bool>>& net,
                              const std::vector<unsigned> concurrent_s,
                              unsigned inps, unsigned outs) :
       inputs(inps),
@@ -139,7 +140,7 @@ public:
 
 std::vector<std::vector<bool>> random_graph_generator() {
   std::vector<std::vector<bool>> vec;
-  unsigned size = rand() % 10000 + 1;
+  unsigned size = 10 + 1;
   vec.resize(size);
   for (unsigned i = 0; i < size; i++) {
     vec[i].resize(size);
@@ -165,6 +166,112 @@ std::vector<unsigned> generate_visited_nodes (const std::vector<std::vector<bool
   }
 
   return visited_nodes;
+}
+
+
+/**
+* @brief delete the row and col indicated by node
+* the matrix is divided in 4 cuadrants
+* [a b]
+* [c b]
+*
+*
+* @param original p_original:...
+* @param node p_node:...
+*/
+void delete_row_col (std::vector<std::vector<bool>>& original, unsigned node) {
+  unsigned size = original.size();
+  std::vector<std::vector<bool>> aux (size - 1);
+  for (auto& row : aux)
+    row.resize(size - 1);
+
+  // First quadrant (a)
+  for (unsigned i = 0; i < node; i++) {
+    for (unsigned j = 0; j < node; j++) {
+      aux[i][j] = original[i][j];
+    }
+  }
+
+  // Second quadrant (b)
+  for (unsigned i = 0; i < node; i++) {
+    for (unsigned j = node + 1; j < size; j++) {
+      aux[i][j - 1] = original[i][j];
+    }
+  }
+
+  // Third quadrant (c)
+  for (unsigned i = node + 1; i < size; i++) {
+    for (unsigned j = 0; j < node; j++) {
+      aux[i - 1][j] = original[i][j];
+    }
+  }
+
+  // Fourth quadrant (d)
+  for (unsigned i = node + 1; i < size; i++) {
+    for (unsigned j = node + 1; j < size; j++) {
+      aux[i - 1][j - 1] = original[i][j];
+    }
+  }
+
+  original = aux;
+  /*
+  for (auto& row : original)
+    row.clear();
+  original.clear();
+  original.resize (size - 1);
+
+  for (unsigned i = 0; i < size - 1; i++)
+    original[i] = aux[i];
+  */
+}
+
+
+/**
+* @brief Find deathend nodes to delete them and search in cascade new posible
+* deathend nodes. Inputs and outputs neuron won't be affected
+*
+* @param vec p_vec: newral network graph
+* @param inputs p_inputs: number of input neurons
+* @param outputs p_outputs: number of output neurons
+*/
+void delete_deathend_nodes (std::vector<std::vector<bool>>& vec,
+                            unsigned inputs, unsigned outputs) {
+  unsigned size = vec.size();
+
+  std::stack<unsigned> predecesors;
+  for (int i = size - outputs - 1; i >= inputs; i--)
+    predecesors.push(i);
+
+  unsigned i;
+  while (predecesors.size() != 0) {
+    // find next valid candidate in the stack
+    do {
+      if (predecesors.size() == 0)
+        return;
+      i = predecesors.top();
+      predecesors.pop();
+    } while (i < inputs || i >= size - outputs - 1);
+
+    bool empty_row = true;
+    for (unsigned j = i + 1; j < size; j++) {
+      if (vec[i][j]) {
+        empty_row = false;
+        j = size;
+      }
+    }
+    // delete deathend node and find all predecesors
+    if (empty_row) {
+      predecesors.push(i);
+      for (unsigned k = 0; k < size; k++) {
+        if (vec[k][i]) {
+          predecesors.push(k > i ? k - 1 : k);
+          vec[k][i] = 0;
+        }
+      }
+      delete_row_col(vec, i);
+      size--;
+    }
+  }
 }
 
 std::vector<unsigned> generate_concurrent_steps (const std::vector<std::vector<bool>>& vec) {
@@ -194,6 +301,21 @@ std::vector<unsigned> generate_concurrent_steps (const std::vector<std::vector<b
   return solve;
 }
 
+
+void print_graph_matrix (const std::vector<std::vector<bool>>& graph) {
+  unsigned size = graph.size();
+
+  for (unsigned i = 0; i < size; i++) {
+    for (unsigned j = 0; j < size; j++) {
+      std::cout << graph[i][j] << " ";
+    }
+    std::cout << "\n";
+  }
+  std::cout << "\n\n";
+}
+
+
+
 int main(int argc, char **argv) {
   srand(time(nullptr));
   auto vec_graph = random_graph_generator();
@@ -204,7 +326,7 @@ int main(int argc, char **argv) {
     {0, 0, 0, 1, 1, 0, 0, 0, 0},
     {0, 0, 0, 0, 0, 1, 0, 0, 1},
     {0, 0, 0, 0, 1, 0, 1, 0, 0},
-    {0, 0, 0, 0, 0, 0, 1, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0},
     {0, 0, 0, 0, 0, 0, 1, 1, 1},
     {0, 0, 0, 0, 0, 0, 0, 1, 1},
     {0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -212,42 +334,74 @@ int main(int argc, char **argv) {
   };
   */
 
+/*
+  vec_graph = {
+    {0, 0, 0, 1, 0, 0, 0, 0, 0},
+    {0, 0, 0, 1, 1, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 1, 0, 0, 1},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 1, 0},
+    {0, 0, 0, 0, 0, 0, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  };
+*/
+  print_graph_matrix(vec_graph);
+
+
+  delete_deathend_nodes(vec_graph, 3, 2);
+
+  print_graph_matrix(vec_graph);
+
   auto vec_solve = generate_concurrent_steps(vec_graph);
-
-  unsigned size = vec_graph.size();
-
-  /*
-  for (unsigned i = 0; i < size; i++) {
-    for (unsigned j = 0; j < size; j++) {
-      std::cout << vec_graph[i][j] << " ";
-    }
-    std::cout << "\n";
-  }
-  */
 
   std::cout << "\n\n";
 
-  size = vec_solve.size();
+  unsigned size = vec_solve.size();
   for (unsigned i = 0; i < size; i++)
     std::cout << vec_solve[i] << " ";
 
-  concurrent_neural_netowrk nn (vec_graph, vec_solve, 3, 2);
 
-  std::vector<double> outputs;
+  //concurrent_neural_netowrk nn (vec_graph, vec_solve, 3, 2);
+
+  //std::vector<double> outputs;
   std::vector<double> inputs{1, 1, 1};
 
   std::cout << "\n\n" << vec_graph.size() << std::endl;
 
-  while (1)
-    nn (inputs, outputs);
+  unsigned n_networks = 100;
 
-  if (nn (inputs, outputs)) {
-    std::cout << "\nSuccess\n";
-    for (auto& value : outputs)
-      std::cout << value << " ";
-  } else {
-    std::cout << "\nError\n";
+  std::vector<concurrent_neural_network*> c_nns (n_networks);
+  std::vector<std::future<void>> promises (n_networks);
+
+  auto op_generate = [&](unsigned i) {
+    c_nns[i] = new concurrent_neural_network (vec_graph, vec_solve, 3, 2);
+  };
+
+  for (unsigned i = 0; i < n_networks; i++)
+    promises[i] = std::async(op_generate, i);
+
+  for (unsigned i = 0; i < n_networks; i++)
+    promises[i].get();
+
+  std::cout << "Redes generadas" << std::endl;
+
+  auto op_evaluate = [&](unsigned i) {
+    std::vector<double> outputs;
+    c_nns[i]->operator() (inputs, outputs);
+  };
+
+  /*
+  while (1) {
+    for (unsigned i = 0; i < n_networks; i++)
+      promises[i] = std::async(op_evaluate, i);
+
+    for (unsigned i = 0; i < n_networks; i++)
+      promises[i].get();
+
+    std::cout << "Fin evaluación" << std::endl;
   }
-
+  */
   return 0;
 }
