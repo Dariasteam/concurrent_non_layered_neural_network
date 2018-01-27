@@ -15,11 +15,11 @@ private:
 public:
   axon (double w) : weight (w) {}
   void set_value (double v) { value = v; }
-  double get_value () const { return value; }
+  double get_value () const { return value * weight; }
 };
 
 class neuron {
-private:
+protected:
   double value;
   double threshold;
 
@@ -28,6 +28,7 @@ private:
   std::vector<axon*> inputs;
   std::vector<axon*> outputs;
 public:
+  neuron () : n_inputs(0) {}
 
   void set_threshold (double t) { threshold = t; }
 
@@ -45,14 +46,27 @@ public:
       value += aux->get_value();
   }
 
-  void propagate_value () {
-    value = std::tanh(value + threshold / n_inputs);
+  virtual void propagate_value () {
+    if (n_inputs == 0)
+      std::cout << "NO HAY" << std::endl;
+
+    value = std::tanh((value / n_inputs) + threshold);
     for (axon* aux : outputs)
       aux->set_value(value);
     value = 0;
   }
 
   double get_value () const { return value; }
+};
+
+class output_neuron : public neuron {
+public:
+  void propagate_value() override {
+    value = (n_inputs == 0) ? 0 : std::tanh((value / n_inputs) + threshold);
+    for (axon* aux : outputs)
+      aux->set_value(value);
+    value = 0;
+  }
 };
 
 class feedback_bus {
@@ -63,7 +77,7 @@ private:
   neuron* destiny;
 public:
 
-  feedback_bus (neuron* des) : destiny (des) {}
+  feedback_bus (neuron* des) : size(0), destiny (des) {}
 
   void add_connection (neuron* origin, double weight) {
     size++;
@@ -119,12 +133,17 @@ public:
       outputs(outs),
       concurrent_steps (concurrent_s)
     {
-
     unsigned size = net_graph.size();
-
     neurons.resize(size);
-    for (unsigned i = 0; i < size; i++)
+
+    // regular neurons
+    for (unsigned i = 0; i < size - outs; i++)
       neurons[i] = new neuron();
+
+    // output neurons (can check no inputs)
+    for (unsigned i = size - outs; i < size; i++)
+      neurons[i] = new output_neuron();
+
 
     // Generate the net
     for (unsigned i = 0; i < size; i++) {
@@ -181,7 +200,7 @@ public:
 
 
     std::vector<std::future<void>> promises (neurons.size());
-    auto calculate_neuron = [&](unsigned i ) {
+    auto calculate_neuron = [&](unsigned i) {
       neurons[i]->calculate_value();
       neurons[i]->propagate_value();
     };
@@ -207,23 +226,6 @@ public:
   }
 };
 
-
-std::vector<std::vector<bool>> random_graph_generator() {
-  std::vector<std::vector<bool>> vec;
-  unsigned size = 50 + 1;
-  vec.resize(size);
-  for (unsigned i = 0; i < size; i++) {
-    vec[i].resize(size);
-    for (unsigned j = i; j < size; j++) {
-      if (rand() % 50 < 1)
-        vec[i][j] = true;
-      else
-        vec[i][j] = false;
-    }
-  }
-  return vec;
-}
-
 std::vector<unsigned> generate_visited_nodes (const std::vector<std::vector<bool>>& vec) {
   unsigned size = vec.size();
   std::vector<unsigned> visited_nodes (size);
@@ -234,7 +236,6 @@ std::vector<unsigned> generate_visited_nodes (const std::vector<std::vector<bool
         visited_nodes[j]++;
     }
   }
-
   return visited_nodes;
 }
 
@@ -249,9 +250,11 @@ std::vector<unsigned> generate_visited_nodes (const std::vector<std::vector<bool
 * @param original p_original:...
 * @param node p_node:...
 */
-void delete_row_col (std::vector<std::vector<bool>>& original, unsigned node) {
+
+template <class T>
+void delete_row_col (std::vector<std::vector<T>>& original, unsigned node) {
   unsigned size = original.size();
-  std::vector<std::vector<bool>> aux (size - 1);
+  std::vector<std::vector<T>> aux (size - 1);
   for (auto& row : aux)
     row.resize(size - 1);
 
@@ -295,12 +298,13 @@ void delete_row_col (std::vector<std::vector<bool>>& original, unsigned node) {
 * @param inputs p_inputs: number of input neurons
 * @param outputs p_outputs: number of output neurons
 */
-void delete_deathend_nodes (std::vector<std::vector<bool>>& vec,
+void delete_deathend_nodes (std::vector<std::vector<bool>>& vec_graph,
+                            std::vector<std::vector<double>>& vec_costs,
                             unsigned inputs, unsigned outputs) {
-  unsigned size = vec.size();
+  unsigned size = vec_graph.size();
 
   std::stack<unsigned> predecesors;
-  for (int i = size - outputs - 1; i >= inputs; i--)
+  for (unsigned i = size - outputs - 1; i >= inputs; i--)
     predecesors.push(i);
 
   unsigned i;
@@ -311,11 +315,11 @@ void delete_deathend_nodes (std::vector<std::vector<bool>>& vec,
         return;
       i = predecesors.top();
       predecesors.pop();
-    } while (i < inputs || i >= size - outputs - 1);
+    } while (i < inputs || i > size - outputs - 1);
 
     bool empty_row = true;
     for (unsigned j = i + 1; j < size; j++) {
-      if (vec[i][j]) {
+      if (vec_graph[i][j]) {
         empty_row = false;
         j = size;
       }
@@ -324,12 +328,68 @@ void delete_deathend_nodes (std::vector<std::vector<bool>>& vec,
     if (empty_row) {
       predecesors.push(i);
       for (unsigned k = 0; k < size; k++) {
-        if (vec[k][i]) {
+        if (vec_graph[k][i]) {
           predecesors.push(k > i ? k - 1 : k);
-          vec[k][i] = 0;
+          vec_graph[k][i] = 0;
         }
       }
-      delete_row_col(vec, i);
+      delete_row_col<bool> (vec_graph, i);
+      delete_row_col<double> (vec_costs, i);
+      size--;
+    }
+  }
+}
+
+/**
+* @brief Delete neurons with no predecesors (excluding inputs and outputs)
+*
+* @param vec_graph p_vec_graph:...
+* @param vec_costs p_vec_costs:...
+* @param inputs p_inputs:...
+* @param outputs p_outputs:...
+*/
+void delete_unreachable_nodes (std::vector<std::vector<bool>>& vec_graph,
+                                 std::vector<std::vector<double>>& vec_costs,
+                                unsigned inputs, unsigned outputs) {
+
+  unsigned size = vec_graph.size();
+
+  unsigned j;
+
+  std::stack<unsigned> sucesors;
+  for (unsigned i = size - outputs - 1; i >= inputs; i--)
+    sucesors.push(i);
+
+  std::vector<bool> has_predecesor (size);
+
+  while (sucesors.size() != 0) {
+    // find next valid candidate in the stack
+    do {
+      if (sucesors.size() == 0)
+        return;
+      j = sucesors.top();
+      sucesors.pop();
+    } while (j < inputs || j > size - outputs - 1);
+
+    bool empty_column = true;
+    for (int i = j - 1; i >= 0; i--) {
+      if (vec_graph[i][j]) {
+        empty_column = false;
+        i = 0;
+      }
+    }
+
+    // delete unreachable node and find all sucessors
+    if (empty_column) {
+      sucesors.push(j);
+      for (unsigned k = 0; k < size; k++) {
+        if (vec_graph[j][k]) {
+          sucesors.push(j > k ? j - 1 : j);
+          vec_graph[j][k] = 0;
+        }
+      }
+      delete_row_col<bool> (vec_graph, j);
+      delete_row_col<double> (vec_costs, j);
       size--;
     }
   }
@@ -383,58 +443,83 @@ void print_graph_matrix (const std::vector<std::vector<bool>>& graph) {
 }
 
 
+std::vector<std::vector<bool>> random_graph_generator(unsigned N) {
+  std::vector<std::vector<bool>> vec;
+  unsigned size = N + 1;
+  vec.resize(size);
+  for (unsigned i = 0; i < size; i++) {
+    vec[i].resize(size);
+    for (unsigned j = 0; j < size; j++) {
+      if (rand() % 7 < 1)
+        vec[i][j] = true;
+      else
+        vec[i][j] = false;
+    }
+  }
+  return vec;
+}
+
+std::vector<std::vector<double>> random_costs_generator(unsigned N) {
+  std::vector<std::vector<double>> vec;
+  unsigned size = N + 1;
+  vec.resize(size);
+  for (unsigned i = 0; i < size; i++) {
+    vec[i].resize(size);
+    for (unsigned j = 0; j < size; j++)
+      vec[i][j] = double(-1000 + (std::rand() % 2000)) / 1000;
+  }
+  return vec;
+}
+
 
 int main(int argc, char **argv) {
   srand(time(nullptr));
-  auto vec_graph = random_graph_generator();
+  auto vec_graph = random_graph_generator(20);
+  auto vec_costs = random_costs_generator(20);
 
-  /*
+/*
   vec_graph = {
-    {0, 0, 0, 1, 0, 0, 0, 0, 0},
-    {0, 0, 0, 1, 1, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 1, 0, 0, 1},
-    {0, 0, 0, 0, 1, 0, 1, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 1, 1, 1},
-    {0, 0, 0, 0, 0, 0, 0, 1, 1},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0},
   };
-  */
+*/
+   print_graph_matrix(vec_graph);
 
-  vec_graph = {
-    {0, 0, 0, 1, 0, 0, 0, 0, 0},
-    {0, 0, 0, 1, 1, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 1, 0, 0, 1},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 1, 0},
-    {0, 0, 0, 0, 0, 0, 1, 1, 1},
-    {0, 0, 0, 0, 0, 0, 0, 1, 1},
-    {0, 0, 0, 0, 1, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  };
+  unsigned first_size = vec_graph.size();;
+  unsigned old_size = 0;
+  unsigned new_size = 0;
 
-  std::vector<std::vector<double>> vec_cost = {
-    {0, 0, 0, 1, 0, 0, 0, 0, 0},
-    {0, 0, 0, 1, 1, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 1, 0, 0, 1},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 1, 0},
-    {0, 0, 0, 0, 0, 0, 1, 1, 1},
-    {0, 0, 0, 0, 0, 0, 0, 1, 1},
-    {0, 0, 0, 0, 1, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  };
+  unsigned counter = 0;
+
+  do {
+    counter++;
+    old_size = vec_graph.size();
+//    std::cout << "Unreachable" << std::endl;
+    delete_unreachable_nodes(vec_graph, vec_costs, 3, 2);
+//    print_graph_matrix(vec_graph);
+
+//    std::cout << "Deathend" << std::endl;
+    delete_deathend_nodes(vec_graph, vec_costs, 3, 2);
+//    print_graph_matrix(vec_graph);
+
+    new_size = vec_graph.size();
+  } while (old_size != new_size);
+
+  std::cout << std::flush;
+
+  std::cout << "Improved from " << first_size << " neurons to "
+  << vec_graph.size() << " " << " in " << counter << " steps\n";
 
 
-//  print_graph_matrix(vec_graph);
-  unsigned old_size = vec_graph.size();
-
-  delete_deathend_nodes(vec_graph, 3, 2);
-
-  std::cout << "Improved from " << old_size << " neurons to " << vec_graph.size() << "\n";
-
-//  print_graph_matrix(vec_graph);
 
   auto vec_solve = generate_concurrent_steps(vec_graph);
 
@@ -445,20 +530,17 @@ int main(int argc, char **argv) {
     std::cout << vec_solve[i] << " ";
 
 
-  //concurrent_neural_netowrk nn (vec_graph, vec_solve, 3, 2);
-
-  //std::vector<double> outputs;
-  std::vector<double> inputs{-1,-1,-1};
+  std::vector<double> inputs{1, 1, 1};
 
   std::cout << "\n\n" << vec_graph.size() << std::endl;
 
-  unsigned n_networks = 1000;
+  unsigned n_networks = 10;
 
   std::vector<concurrent_neural_network*> c_nns (n_networks);
   std::vector<std::future<void>> promises (n_networks);
 
   auto op_generate = [&](unsigned i) {
-    c_nns[i] = new concurrent_neural_network (vec_graph, vec_cost, vec_solve, 3, 2);
+    c_nns[i] = new concurrent_neural_network (vec_graph, vec_costs, vec_solve, 3, 2);
   };
 
   for (unsigned i = 0; i < n_networks; i++)
@@ -472,7 +554,6 @@ int main(int argc, char **argv) {
   auto op_evaluate = [&](unsigned i) {
     std::vector<double> outputs;
     c_nns[i]->operator() (inputs, outputs);
-    std::cout << "Fin " << i << " " << outputs[0] << " " << outputs[1] << std::endl;
   };
 
   while (true) {
