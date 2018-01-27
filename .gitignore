@@ -1,3 +1,4 @@
 concurrent_graph.kdev4
 concurrent_graph
 .kdev4
+*.o

@@ -1,2 +1,10 @@
-default:
-	g++ -fPIC -std=c++11 -pthread -g -o concurrent_graph main.cpp
+CC=clang++
+CXXFLAGS=-g -std=c++11 -fPIC -pthread
+
+OBJS = neuron.o feedback_bus.o concurrent_neural_network.o main.o
+
+default: ${OBJS}
+	$(CC) $(CXXFLAGS) -o concurrent_graph ${OBJS}
+
+clean:
+	rm -rf *.o concurrent_graph
