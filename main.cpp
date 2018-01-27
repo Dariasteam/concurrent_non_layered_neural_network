@@ -226,6 +226,14 @@ public:
   }
 };
 
+/**
+* @brief Generates a vector containing the number of predecesors of each node
+* This function is used by #generate_concurrent_steps to which neurons can
+* be calculated concurrently.
+*
+* @param vec p_vec:...
+* @return std::vector< unsigned int >
+*/
 std::vector<unsigned> generate_visited_nodes (const std::vector<std::vector<bool>>& vec) {
   unsigned size = vec.size();
   std::vector<unsigned> visited_nodes (size);
@@ -450,7 +458,7 @@ std::vector<std::vector<bool>> random_graph_generator(unsigned N) {
   for (unsigned i = 0; i < size; i++) {
     vec[i].resize(size);
     for (unsigned j = 0; j < size; j++) {
-      if (rand() % 7 < 1)
+      if (rand() % 15 < 1)
         vec[i][j] = true;
       else
         vec[i][j] = false;
@@ -474,8 +482,8 @@ std::vector<std::vector<double>> random_costs_generator(unsigned N) {
 
 int main(int argc, char **argv) {
   srand(time(nullptr));
-  auto vec_graph = random_graph_generator(20);
-  auto vec_costs = random_costs_generator(20);
+  auto vec_graph = random_graph_generator(3000);
+  auto vec_costs = random_costs_generator(3000);
 
 /*
   vec_graph = {
@@ -492,7 +500,7 @@ int main(int argc, char **argv) {
     {0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0},
   };
 */
-   print_graph_matrix(vec_graph);
+  // print_graph_matrix(vec_graph);
 
   unsigned first_size = vec_graph.size();;
   unsigned old_size = 0;
@@ -519,22 +527,21 @@ int main(int argc, char **argv) {
   std::cout << "Improved from " << first_size << " neurons to "
   << vec_graph.size() << " " << " in " << counter << " steps\n";
 
-
-
   auto vec_solve = generate_concurrent_steps(vec_graph);
 
   std::cout << "\n\n";
-
+/*
   unsigned size = vec_solve.size();
   for (unsigned i = 0; i < size; i++)
     std::cout << vec_solve[i] << " ";
-
+*/
 
   std::vector<double> inputs{1, 1, 1};
 
-  std::cout << "\n\n" << vec_graph.size() << std::endl;
+  std::cout << "Net is calculated in " << vec_solve.size()
+            << " concurrent steps" << std::endl;
 
-  unsigned n_networks = 10;
+  unsigned n_networks = 1;
 
   std::vector<concurrent_neural_network*> c_nns (n_networks);
   std::vector<std::future<void>> promises (n_networks);
