@@ -1,5 +1,5 @@
-CC=clang++
-CXXFLAGS=-g -std=c++11 -fPIC -pthread
+CC=g++
+CXXFLAGS=-g -std=c++11 -fPIC -pthread -O3
 
 OBJS = neuron.o feedback_bus.o concurrent_neural_network.o main.o
 

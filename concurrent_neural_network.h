@@ -53,6 +53,7 @@ public:
 
   bool operator () (const std::vector<double>& inputs_values,
                     std::vector<double>& outputs_values);
+
 };
 
 #endif // CONCURRENT_NEURAL_NETWORK_H

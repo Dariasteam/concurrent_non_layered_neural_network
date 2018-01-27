@@ -7,6 +7,7 @@
 #include <cmath>
 
 #include <time.h>
+#include <chrono>
 
 #include "neuron.h"
 #include "axon.h"
@@ -269,8 +270,8 @@ std::vector<std::vector<double>> random_costs_generator(unsigned N) {
 
 int main(int argc, char **argv) {
   srand(time(nullptr));
-  auto vec_graph = random_graph_generator(7000);
-  auto vec_costs = random_costs_generator(7000);
+  auto vec_graph = random_graph_generator(50);
+  auto vec_costs = random_costs_generator(50);
 
 /*
   vec_graph = {
@@ -328,7 +329,7 @@ int main(int argc, char **argv) {
   std::cout << "Net is calculated in " << vec_solve.size()
             << " concurrent steps" << std::endl;
 
-  unsigned n_networks = 1;
+  unsigned n_networks = 80;
 
   std::vector<concurrent_neural_network*> c_nns (n_networks);
   std::vector<std::future<void>> promises (n_networks);
@@ -350,6 +351,8 @@ int main(int argc, char **argv) {
     c_nns[i]->operator() (inputs, outputs);
   };
 
+  auto begin = std::chrono::high_resolution_clock::now();
+  counter = 0;
   while (true) {
     for (unsigned i = 0; i < n_networks; i++)
       promises[i] = std::async(op_evaluate, i);
@@ -357,7 +360,16 @@ int main(int argc, char **argv) {
     for (unsigned i = 0; i < n_networks; i++)
       promises[i].get();
 
-    std::cout << "Fin evaluación" << std::endl;
+    if (counter < 10) {
+      counter++;
+    } else {
+      auto end = std::chrono::high_resolution_clock::now();
+      double time = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+      std::cout << "Fin evaluación " << time / 1000 << std::endl;
+      counter = 0;
+      begin = std::chrono::high_resolution_clock::now();
+    }
+
   }
 
   return 0;
