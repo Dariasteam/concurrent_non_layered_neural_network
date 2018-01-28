@@ -315,56 +315,21 @@ int main(int argc, char **argv) {
   vec_graph = random_graph_generator(50);
   vec_costs = random_costs_generator(50);
 */
+
   read_net_from_file ("testfile.dat", vec_graph, vec_costs);
 
-  //print_matrix(vec_costs);
-
-  unsigned first_size = vec_graph.size();;
-  unsigned old_size = 0;
-  unsigned new_size = 0;
-
-  unsigned counter = 0;
-
-  do {
-    counter++;
-    old_size = vec_graph.size();
-//    std::cout << "Unreachable" << std::endl;
-    delete_unreachable_nodes(vec_graph, vec_costs, 3, 2);
-//    print_graph_matrix(vec_graph);
-
-//    std::cout << "Deathend" << std::endl;
-    delete_deathend_nodes(vec_graph, vec_costs, 3, 2);
-//    print_graph_matrix(vec_graph);
-
-    new_size = vec_graph.size();
-  } while (old_size != new_size);
-
-  std::cout << std::flush;
-
-  std::cout << "Improved from " << first_size << " neurons to "
-  << vec_graph.size() << " " << " in " << counter << " steps\n";
-
-  auto vec_solve = generate_concurrent_steps(vec_graph);
-
-  std::cout << "\n\n";
-/*
-  unsigned size = vec_solve.size();
-  for (unsigned i = 0; i < size; i++)
-    std::cout << vec_solve[i] << " ";
-*/
-
-  std::vector<double> inputs{1, 1, 1};
-
-  std::cout << "Net is calculated in " << vec_solve.size()
-            << " concurrent steps" << std::endl;
 
   unsigned n_networks = 80;
 
   std::vector<concurrent_neural_network*> c_nns (n_networks);
   std::vector<std::future<void>> promises (n_networks);
 
+  for (unsigned i = 0; i < n_networks; i++)
+    c_nns[i] = new concurrent_neural_network (vec_graph, vec_costs, 3, 2);
+
+/*
   auto op_generate = [&](unsigned i) {
-    c_nns[i] = new concurrent_neural_network (vec_graph, vec_costs, vec_solve, 3, 2);
+    c_nns[i] = new concurrent_neural_network (vec_graph, vec_costs, 3, 2);
   };
 
   for (unsigned i = 0; i < n_networks; i++)
@@ -372,17 +337,21 @@ int main(int argc, char **argv) {
 
   for (unsigned i = 0; i < n_networks; i++)
     promises[i].get();
-
+*/
   std::cout << "Redes generadas" << std::endl;
+  std::cout << "Net is calculated in " << c_nns[0]->c_steps()
+  << " concurrent steps" << std::endl;
+
+  std::vector<double> inputs{1, 1, 1};
 
   auto op_evaluate = [&](unsigned i) {
     std::vector<double> outputs;
     c_nns[i]->operator() (inputs, outputs);
-     std::cout << outputs[0] << ' ' << outputs[1] << std::endl;
+    std::cout << outputs[0] << ' ' << outputs[1] << std::endl;
   };
 
   auto begin = std::chrono::high_resolution_clock::now();
-  counter = 0;
+  unsigned counter = 0;
   while (true) {
     for (unsigned i = 0; i < n_networks; i++)
       promises[i] = std::async(op_evaluate, i);
@@ -399,7 +368,6 @@ int main(int argc, char **argv) {
       counter = 0;
       begin = std::chrono::high_resolution_clock::now();
     }
-
   }
 
   return 0;
