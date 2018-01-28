@@ -15,216 +15,6 @@
 #include "feedback_bus.h"
 #include "concurrent_neural_network.h"
 
-/**
-* @brief Generates a vector containing the number of predecesors of each node
-* This function is used by #generate_concurrent_steps to which neurons can
-* be calculated concurrently.
-*
-* @param vec p_vec:...
-* @return std::vector< unsigned int >
-*/
-std::vector<unsigned> generate_visited_nodes (const std::vector<std::vector<bool>>& vec) {
-  unsigned size = vec.size();
-  std::vector<unsigned> visited_nodes (size);
-
-  for (unsigned i = 0; i < size; i++) {
-    for (unsigned j = i + 1; j < size; j++) {
-      if (vec[i][j])
-        visited_nodes[j]++;
-    }
-  }
-  return visited_nodes;
-}
-
-
-/**
-* @brief delete the row and col indicated by node
-* the matrix is divided in 4 cuadrants
-* [a b]
-* [c b]
-*
-*
-* @param original p_original:...
-* @param node p_node:...
-*/
-
-template <class T>
-void delete_row_col (std::vector<std::vector<T>>& original, unsigned node) {
-  unsigned size = original.size();
-  std::vector<std::vector<T>> aux (size - 1);
-  for (auto& row : aux)
-    row.resize(size - 1);
-
-  // First quadrant (a)
-  for (unsigned i = 0; i < node; i++) {
-    for (unsigned j = 0; j < node; j++) {
-      aux[i][j] = original[i][j];
-    }
-  }
-
-  // Second quadrant (b)
-  for (unsigned i = 0; i < node; i++) {
-    for (unsigned j = node + 1; j < size; j++) {
-      aux[i][j - 1] = original[i][j];
-    }
-  }
-
-  // Third quadrant (c)
-  for (unsigned i = node + 1; i < size; i++) {
-    for (unsigned j = 0; j < node; j++) {
-      aux[i - 1][j] = original[i][j];
-    }
-  }
-
-  // Fourth quadrant (d)
-  for (unsigned i = node + 1; i < size; i++) {
-    for (unsigned j = node + 1; j < size; j++) {
-      aux[i - 1][j - 1] = original[i][j];
-    }
-  }
-
-  original = aux;
-}
-
-
-/**
-* @brief Find deathend nodes to delete them and search in cascade new posible
-* deathend nodes. Inputs and outputs neuron won't be affected
-*
-* @param vec p_vec: newral network graph
-* @param inputs p_inputs: number of input neurons
-* @param outputs p_outputs: number of output neurons
-*/
-void delete_deathend_nodes (std::vector<std::vector<bool>>& vec_graph,
-                            std::vector<std::vector<double>>& vec_costs,
-                            unsigned inputs, unsigned outputs) {
-  unsigned size = vec_graph.size();
-
-  std::stack<unsigned> predecesors;
-  for (unsigned i = size - outputs - 1; i >= inputs; i--)
-    predecesors.push(i);
-
-  unsigned i;
-  while (predecesors.size() != 0) {
-    // find next valid candidate in the stack
-    do {
-      if (predecesors.size() == 0)
-        return;
-      i = predecesors.top();
-      predecesors.pop();
-    } while (i < inputs || i > size - outputs - 1);
-
-    bool empty_row = true;
-    for (unsigned j = i + 1; j < size; j++) {
-      if (vec_graph[i][j]) {
-        empty_row = false;
-        j = size;
-      }
-    }
-    // delete deathend node and find all predecesors
-    if (empty_row) {
-      predecesors.push(i);
-      for (unsigned k = 0; k < size; k++) {
-        if (vec_graph[k][i]) {
-          predecesors.push(k > i ? k - 1 : k);
-          vec_graph[k][i] = 0;
-        }
-      }
-      delete_row_col<bool> (vec_graph, i);
-      delete_row_col<double> (vec_costs, i);
-      size--;
-    }
-  }
-}
-
-/**
-* @brief Delete neurons with no predecesors (excluding inputs and outputs)
-*
-* @param vec_graph p_vec_graph:...
-* @param vec_costs p_vec_costs:...
-* @param inputs p_inputs:...
-* @param outputs p_outputs:...
-*/
-void delete_unreachable_nodes (std::vector<std::vector<bool>>& vec_graph,
-                                 std::vector<std::vector<double>>& vec_costs,
-                                unsigned inputs, unsigned outputs) {
-
-  unsigned size = vec_graph.size();
-
-  unsigned j;
-
-  std::stack<unsigned> sucesors;
-  for (unsigned i = size - outputs - 1; i >= inputs; i--)
-    sucesors.push(i);
-
-  std::vector<bool> has_predecesor (size);
-
-  while (sucesors.size() != 0) {
-    // find next valid candidate in the stack
-    do {
-      if (sucesors.size() == 0)
-        return;
-      j = sucesors.top();
-      sucesors.pop();
-    } while (j < inputs || j > size - outputs - 1);
-
-    bool empty_column = true;
-    for (int i = j - 1; i >= 0; i--) {
-      if (vec_graph[i][j]) {
-        empty_column = false;
-        i = 0;
-      }
-    }
-
-    // delete unreachable node and find all sucessors
-    if (empty_column) {
-      sucesors.push(j);
-      for (unsigned k = 0; k < size; k++) {
-        if (vec_graph[j][k]) {
-          sucesors.push(j > k ? j - 1 : j);
-          vec_graph[j][k] = 0;
-        }
-      }
-      delete_row_col<bool> (vec_graph, j);
-      delete_row_col<double> (vec_costs, j);
-      size--;
-    }
-  }
-}
-
-/**
-* @brief Extracts the hidden layers of the net and creates a vector of groups
-* of neurons that can be safely calculated concurrently.
-*
-* @param vec p_vec: Cost matriz of the net
-* @return std::vector< unsigned int > groups of neurons conccurent-safe
-*/
-std::vector<unsigned> generate_concurrent_steps (const std::vector<std::vector<bool>>& vec) {
-  unsigned size = vec.size();
-  std::vector<unsigned> visited_nodes = generate_visited_nodes(vec);
-
-  std::vector<unsigned> solve;
-
-  auto aux_visited = visited_nodes;
-
-  unsigned last_node = 0;
-
-  for (unsigned i = 0; i < size; i++) {
-    for (unsigned j = i + 1; j < size; j++) {
-      if (vec[i][j]) {
-        if (visited_nodes[i] != 0) {
-          visited_nodes = aux_visited;
-          solve.push_back(last_node);
-        }
-        aux_visited[j]--;
-        last_node = i;
-      }
-    }
-  }
-  solve.push_back(last_node);
-  solve.push_back(size - 1);
-  return solve;
-}
 
 template <class T>
 void print_matrix (const std::vector<std::vector<T>>& graph) {
@@ -324,10 +114,6 @@ int main(int argc, char **argv) {
   std::vector<concurrent_neural_network*> c_nns (n_networks);
   std::vector<std::future<void>> promises (n_networks);
 
-  for (unsigned i = 0; i < n_networks; i++)
-    c_nns[i] = new concurrent_neural_network (vec_graph, vec_costs, 3, 2);
-
-/*
   auto op_generate = [&](unsigned i) {
     c_nns[i] = new concurrent_neural_network (vec_graph, vec_costs, 3, 2);
   };
@@ -337,7 +123,7 @@ int main(int argc, char **argv) {
 
   for (unsigned i = 0; i < n_networks; i++)
     promises[i].get();
-*/
+
   std::cout << "Redes generadas" << std::endl;
   std::cout << "Net is calculated in " << c_nns[0]->c_steps()
   << " concurrent steps" << std::endl;
@@ -369,6 +155,5 @@ int main(int argc, char **argv) {
       begin = std::chrono::high_resolution_clock::now();
     }
   }
-
   return 0;
 }
